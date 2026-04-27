@@ -276,8 +276,8 @@ function buildSourcePrompt(sourceName: string, dailySummaries: DailySummary[]): 
     `单日总结 ${index + 1}`,
     `日期：${summary.tradeDay}`,
     `观点：${summary.sourceView}`,
-    `关键信号：${summary.keyPoints.join('；')}`,
-    `风险：${summary.riskPoints.join('；')}`,
+    `关键信号：${summary.keyPoints.slice(0, 2).join('；') || '无'}`,
+    `风险：${summary.riskPoints.slice(0, 1).join('；') || '无'}`,
   ].join('\n')).join('\n\n');
   return `来源：${sourceName}\n请把以下最近三天单日总结合并为一个来源总结：\n\n${chunks}`;
 }
@@ -291,8 +291,8 @@ function buildFinalPrompt(context: AggregatedContext, summaries: SourceSummary[]
     `来源总结 ${index + 1}`,
     `来源：${summary.sourceName}`,
     `观点：${summary.sourceView}`,
-    `关键信号：${summary.keyPoints.join('；')}`,
-    `风险：${summary.riskPoints.join('；')}`,
+    `关键信号：${summary.keyPoints.slice(0, 2).join('；') || '无'}`,
+    `风险：${summary.riskPoints.slice(0, 1).join('；') || '无'}`,
   ].join('\n')).join('\n\n');
   return `${coverage}\n\n${sourceBlocks}`;
 }
