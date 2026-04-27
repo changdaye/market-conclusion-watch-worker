@@ -15,7 +15,7 @@ const makeReport = (sourcePrefix: string, key: string, extractedText: string): S
 
 describe('aggregateReports', () => {
   it('dedupes repeated reports and tracks missing sources', () => {
-    const config = parseConfig({ MAX_TOTAL_CHARS: '5000', MAX_SOURCE_CHARS: '2000', MAX_REPORT_CHARS: '1000' } as any);
+    const config = parseConfig({ MAX_TOTAL_CHARS: '5000', MAX_SOURCE_CHARS: '2000', MAX_REPORT_CHARS: '1000', MAX_REPORTS_PER_SOURCE: '2' } as any);
     const context = aggregateReports([
       makeReport('jinshi-market-brief-worker', 'jinshi-market-brief-worker/20260427100000.html', '市场情绪改善，风险偏好回暖。'),
       makeReport('jinshi-market-brief-worker', 'jinshi-market-brief-worker/20260427103000.html', '市场情绪改善，风险偏好回暖。'),

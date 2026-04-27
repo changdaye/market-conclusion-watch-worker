@@ -27,7 +27,7 @@ function makeConfig(): AppConfig {
     lookbackDays: 3,
     llmModel: 'gpt-5.4',
     sourcePrefixes: ['jinshi-market-brief-worker'],
-    maxReportsPerSource: 4,
+    maxReportsPerSource: 1,
     maxReportChars: 6000,
     maxSourceChars: 12000,
     maxTotalChars: 48000,
