@@ -96,8 +96,18 @@ function normalizeConclusion(parsed: any, modelLabel: string): MarketConclusion 
   };
 }
 
+async function fetchWithTimeout(url: string, init: RequestInit, timeoutMs: number): Promise<Response> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, { ...init, signal: controller.signal });
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 async function summarizeWithOpenAICompatible(config: AppConfig, context: AggregatedContext): Promise<MarketConclusion> {
-  const response = await fetch(`${config.llmBaseUrl.replace(/\/+$/, '')}/chat/completions`, {
+  const response = await fetchWithTimeout(`${config.llmBaseUrl.replace(/\/+$/, '')}/chat/completions`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -113,7 +123,7 @@ async function summarizeWithOpenAICompatible(config: AppConfig, context: Aggrega
       ],
       temperature: 0.2,
     }),
-  });
+  }, config.requestTimeoutMs);
   if (!response.ok) {
     const text = await response.text();
     throw new Error(`OpenAI-compatible HTTP ${response.status}: ${text.slice(0, 500)}`);

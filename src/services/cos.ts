@@ -33,15 +33,8 @@ async function buildCosAuthorization(config: AppConfig, method: string, pathname
   const queryEntries = [...query.entries()].sort((a, b) => a[0].localeCompare(b[0]));
   const paramList = queryEntries.map(([key]) => key.toLowerCase()).join(';');
   const httpParameters = queryEntries.map(([key, value]) => `${encodeCos(key.toLowerCase())}=${encodeCos(value)}`).join('&');
-  const httpString = `${method.toLowerCase()}
-${pathname}
-${httpParameters}
-${httpHeaders}
-`;
-  const stringToSign = `sha1
-${keyTime}
-${await sha1Hex(httpString)}
-`;
+  const httpString = `${method.toLowerCase()}\n${pathname}\n${httpParameters}\n${httpHeaders}\n`;
+  const stringToSign = `sha1\n${keyTime}\n${await sha1Hex(httpString)}\n`;
   const signature = await hmacSha1Hex(signKey, stringToSign);
   return `q-sign-algorithm=sha1&q-ak=${config.cosSecretId}&q-sign-time=${keyTime}&q-key-time=${keyTime}&q-header-list=${headerList}&q-url-param-list=${paramList}&q-signature=${signature}`;
 }
@@ -71,20 +64,29 @@ function parseListXml(xml: string): { objects: CosObjectSummary[]; nextContinuat
   return { objects, nextContinuationToken: nextContinuationToken ? decodeXml(nextContinuationToken) : undefined };
 }
 
+async function fetchWithTimeout(url: string, init: RequestInit, timeoutMs: number): Promise<Response> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, { ...init, signal: controller.signal });
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 async function cosRequest(config: AppConfig, method: string, url: URL, contentType = ''): Promise<Response> {
   const date = new Date();
   const headers = new Map<string, string>([['date', date.toUTCString()], ['host', url.host]]);
   if (contentType) headers.set('content-type', contentType);
   const authorization = await buildCosAuthorization(config, method, url.pathname, headers, url.searchParams, date);
-  const response = await fetch(url.toString(), {
+  return fetchWithTimeout(url.toString(), {
     method,
     headers: {
       Authorization: authorization,
       Date: headers.get('date')!,
       ...(contentType ? { 'Content-Type': contentType } : {}),
     },
-  });
-  return response;
+  }, config.requestTimeoutMs);
 }
 
 export async function uploadDetailedReportToCos(config: AppConfig, content: string, now = new Date()): Promise<{ key: string; url: string }> {
@@ -99,7 +101,7 @@ export async function uploadDetailedReportToCos(config: AppConfig, content: stri
     ['host', url.host],
   ]);
   const authorization = await buildCosAuthorization(config, 'put', url.pathname, headers, new URLSearchParams(), now);
-  const response = await fetch(objectUrl, {
+  const response = await fetchWithTimeout(objectUrl, {
     method: 'PUT',
     headers: {
       Authorization: authorization,
@@ -107,7 +109,7 @@ export async function uploadDetailedReportToCos(config: AppConfig, content: stri
       'Content-Type': contentType,
     },
     body: content,
-  });
+  }, config.requestTimeoutMs);
   if (!response.ok) {
     const text = await response.text();
     throw new Error(`COS upload HTTP ${response.status}: ${text.slice(0, 500)}`);
@@ -138,7 +140,7 @@ export async function listCosObjects(config: AppConfig, prefix: string): Promise
 
 export async function fetchCosObjectText(config: AppConfig, key: string): Promise<string> {
   const url = `${config.cosBaseUrl.replace(/\/+$/, '')}/${key}`;
-  const response = await fetch(url);
+  const response = await fetchWithTimeout(url, {}, config.requestTimeoutMs);
   if (!response.ok) throw new Error(`COS object HTTP ${response.status} for ${key}`);
   return response.text();
 }
