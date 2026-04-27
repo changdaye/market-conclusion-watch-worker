@@ -4,7 +4,6 @@ const DEFAULT_WORKERS_AI_MODEL = '@cf/meta/llama-3.2-1b-instruct';
 const OPENAI_COMPAT_REASONING_EFFORT = 'xhigh';
 const OPENAI_COMPAT_MAX_COMPLETION_TOKENS = 700;
 const ACTIONS: InvestmentAction[] = ['观望', '轻仓试探', '分批布局', '持有等待', '降低仓位', '偏防守'];
-const GROUP_BATCH_SIZE = 3;
 
 interface WorkersAIResult {
   response?: string;
@@ -271,12 +270,6 @@ function buildFinalPrompt(context: AggregatedContext, summaries: SourceSummary[]
   return `${coverage}\n\n${buildBatchPrompt(summaries)}`;
 }
 
-function chunk<T>(items: T[], size: number): T[][] {
-  const groups: T[][] = [];
-  for (let index = 0; index < items.length; index += size) groups.push(items.slice(index, index + size));
-  return groups;
-}
-
 export async function summarizeWithLLM(config: AppConfig, ai: Ai | undefined, context: AggregatedContext): Promise<MarketConclusion> {
   if (!context.totalReports) return fallbackConclusion(context, '无可用 LLM 输入');
 
@@ -291,24 +284,9 @@ export async function summarizeWithLLM(config: AppConfig, ai: Ai | undefined, co
       (content) => normalizeSourceSummaryFromText(content, group.sourcePrefix),
     )));
 
-    let proxyErrors = sourceStage.map((result) => result.proxyError).filter(Boolean).join('；');
-    let summaries = sourceStage.map((result) => result.value);
-    let backend: 'proxy' | 'workers-ai' = sourceStage.some((result) => result.backend === 'workers-ai') ? 'workers-ai' : 'proxy';
-
-    while (summaries.length > GROUP_BATCH_SIZE) {
-      const batches = chunk(summaries, GROUP_BATCH_SIZE);
-      const batchStage = await Promise.all(batches.map((batch, index) => invokeModel(
-        config,
-        ai,
-        SOURCE_SYSTEM_PROMPT,
-        `请把以下多个来源总结再压缩成一个更高层次的阶段总结。阶段：${index + 1}\n\n${buildBatchPrompt(batch)}`,
-        (content) => normalizeSourceSummaryFromText(content, `stage-${index + 1}`),
-      )));
-      const batchErrors = batchStage.map((result) => result.proxyError).filter(Boolean).join('；');
-      if (batchErrors) proxyErrors = proxyErrors ? `${proxyErrors}；${batchErrors}` : batchErrors;
-      if (batchStage.some((result) => result.backend === 'workers-ai')) backend = 'workers-ai';
-      summaries = batchStage.map((result) => result.value);
-    }
+    const proxyErrors = sourceStage.map((result) => result.proxyError).filter(Boolean).join('；');
+    const summaries = sourceStage.map((result) => result.value);
+    const backend: 'proxy' | 'workers-ai' = sourceStage.some((result) => result.backend === 'workers-ai') ? 'workers-ai' : 'proxy';
 
     const finalStage = await invokeModel(
       config,
@@ -318,7 +296,7 @@ export async function summarizeWithLLM(config: AppConfig, ai: Ai | undefined, co
       (content) => normalizeConclusionFromText(content, '', 'proxy'),
     );
 
-    if (finalStage.proxyError) proxyErrors = proxyErrors ? `${proxyErrors}；${finalStage.proxyError}` : finalStage.proxyError;
+    const mergedProxyErrors = finalStage.proxyError ? (proxyErrors ? `${proxyErrors}；${finalStage.proxyError}` : finalStage.proxyError) : proxyErrors;
     const finalBackend = finalStage.backend === 'workers-ai' || backend === 'workers-ai' ? 'workers-ai' : 'proxy';
     const modelLabel = finalBackend === 'proxy'
       ? `${formatModelLabel(config.llmModel)} (${OPENAI_COMPAT_REASONING_EFFORT})`
@@ -328,7 +306,7 @@ export async function summarizeWithLLM(config: AppConfig, ai: Ai | undefined, co
       ...finalStage.value,
       modelLabel,
       llmBackend: finalBackend,
-      upstreamError: proxyErrors || undefined,
+      upstreamError: mergedProxyErrors || undefined,
     };
   } catch (error) {
     const detail = error instanceof Error ? error.message : String(error);
