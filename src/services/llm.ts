@@ -124,7 +124,7 @@ async function summarizeWithOpenAICompatible(config: AppConfig, context: Aggrega
       ],
       temperature: 0.2,
     }),
-  }, config.requestTimeoutMs);
+  }, Math.max(config.requestTimeoutMs, 30000));
   if (!response.ok) {
     const text = await response.text();
     throw new Error(`OpenAI-compatible HTTP ${response.status}: ${text.slice(0, 500)}`);
