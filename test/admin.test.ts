@@ -6,7 +6,7 @@ describe('admin trigger', () => {
     const response = await worker.fetch(new Request('https://example.com/admin/trigger', { method: 'POST' }), {
       MANUAL_TRIGGER_TOKEN: 'secret',
       RUNTIME_KV: { get: async () => null, put: async () => undefined } as any,
-    } as any);
+    } as any, { waitUntil() {} } as any);
     expect(response.status).toBe(401);
   });
 });

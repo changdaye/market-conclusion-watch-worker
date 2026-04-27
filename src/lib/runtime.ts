@@ -1,6 +1,7 @@
-import type { RuntimeState } from '../types';
+import type { LastRunRecord, RuntimeState } from '../types';
 
 const KEY = 'market-conclusion-watch-worker:runtime_state';
+const LAST_RUN_KEY = 'market-conclusion-watch-worker:last_run';
 
 export async function getRuntimeState(kv: KVNamespace): Promise<RuntimeState> {
   const raw = await kv.get(KEY);
@@ -10,6 +11,15 @@ export async function getRuntimeState(kv: KVNamespace): Promise<RuntimeState> {
 
 export async function setRuntimeState(kv: KVNamespace, state: RuntimeState): Promise<void> {
   await kv.put(KEY, JSON.stringify(state));
+}
+
+export async function getLastRunRecord(kv: KVNamespace): Promise<LastRunRecord | null> {
+  const raw = await kv.get(LAST_RUN_KEY);
+  return raw ? JSON.parse(raw) as LastRunRecord : null;
+}
+
+export async function setLastRunRecord(kv: KVNamespace, record: LastRunRecord): Promise<void> {
+  await kv.put(LAST_RUN_KEY, JSON.stringify(record));
 }
 
 export function recordSuccess(state: RuntimeState, now = new Date()): RuntimeState {

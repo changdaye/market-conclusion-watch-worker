@@ -109,6 +109,25 @@ export interface MarketConclusion {
   upstreamError?: string;
 }
 
+export interface LastRunRecord {
+  startedAt: string;
+  finishedAt?: string;
+  status: 'running' | 'succeeded' | 'failed';
+  trigger: 'manual' | 'scheduled';
+  tradeDate?: string;
+  reportUrl?: string;
+  action?: InvestmentAction;
+  modelLabel?: string;
+  fallbackUsed?: boolean;
+  fallbackReason?: string;
+  llmBackend?: 'proxy' | 'workers-ai' | 'fallback';
+  upstreamError?: string;
+  messagePreview?: string;
+  usedSources?: string[];
+  missingSources?: string[];
+  error?: string;
+}
+
 export interface RuntimeState {
   lastSuccessAt?: string;
   lastFailureAt?: string;

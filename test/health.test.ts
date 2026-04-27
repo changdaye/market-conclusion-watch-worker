@@ -10,7 +10,7 @@ class FakeKV {
 
 describe('worker health', () => {
   it('returns config metadata for health', async () => {
-    const response = await worker.fetch(new Request('https://example.com/health'), { RUNTIME_KV: new FakeKV() as any } as any);
+    const response = await worker.fetch(new Request('https://example.com/health'), { RUNTIME_KV: new FakeKV() as any } as any, { waitUntil() {} } as any);
     const payload = await response.json() as Record<string, unknown>;
     expect(response.status).toBe(200);
     expect(payload.ok).toBe(true);

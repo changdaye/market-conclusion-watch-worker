@@ -4,13 +4,13 @@ import { buildDailyMessage, buildFailureAlertMessage, buildHeartbeatMessage } fr
 import { buildDetailedReport } from './lib/report';
 import { buildDetailedReportPublicUrl, maybeHandleDetailedReportRequest, saveDetailedReportCopy } from './lib/report-storage';
 import { aggregateReports } from './lib/report-aggregate';
-import { getRuntimeState, recordFailure, recordSuccess, setRuntimeState, shouldSendFailureAlert, shouldSendHeartbeat } from './lib/runtime';
-import { formatDateInZone, isoNow, weekdayInZone } from './lib/time';
+import { getLastRunRecord, getRuntimeState, recordFailure, recordSuccess, setLastRunRecord, setRuntimeState, shouldSendFailureAlert, shouldSendHeartbeat } from './lib/runtime';
+import { formatDateInZone, weekdayInZone } from './lib/time';
 import { uploadDetailedReportToCos } from './services/cos';
 import { collectRecentSourceReports } from './services/cos-source';
 import { pushToFeishu } from './services/feishu';
 import { summarizeWithLLM } from './services/llm';
-import type { Env, RunResult, RuntimeState } from './types';
+import type { Env, LastRunRecord, RunResult, RuntimeState } from './types';
 
 function json(data: Record<string, unknown>, status = 200): Response {
   return Response.json(data, { status });
@@ -61,8 +61,62 @@ async function maybeSendHeartbeat(env: Env, state: RuntimeState, now: Date): Pro
   return { ...state, lastHeartbeatAt: now.toISOString() };
 }
 
+async function executeRunAndPersist(env: Env, trigger: 'manual' | 'scheduled', now = new Date()): Promise<void> {
+  await setLastRunRecord(env.RUNTIME_KV, {
+    startedAt: now.toISOString(),
+    status: 'running',
+    trigger,
+  });
+
+  const runtime = await getRuntimeState(env.RUNTIME_KV);
+  try {
+    const result = await runDailyDigest(env, now);
+    let nextState = recordSuccess(runtime, now);
+    nextState = await maybeSendHeartbeat(env, nextState, now);
+    await setRuntimeState(env.RUNTIME_KV, nextState);
+    const record: LastRunRecord = {
+      startedAt: now.toISOString(),
+      finishedAt: new Date().toISOString(),
+      status: 'succeeded',
+      trigger,
+      tradeDate: result.tradeDate,
+      reportUrl: result.reportUrl,
+      action: result.conclusion.action,
+      modelLabel: result.modelLabel,
+      fallbackUsed: result.conclusion.fallbackUsed,
+      fallbackReason: result.conclusion.fallbackReason,
+      llmBackend: result.conclusion.llmBackend,
+      upstreamError: result.conclusion.upstreamError,
+      messagePreview: result.messagePreview,
+      usedSources: result.context.usedSources,
+      missingSources: result.context.missingSources,
+    };
+    await setLastRunRecord(env.RUNTIME_KV, record);
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    let nextState = recordFailure(runtime, detail, now);
+    if (shouldSendFailureAlert(nextState, parseConfig(env).failureAlertThreshold, parseConfig(env).failureAlertCooldownMinutes, now)) {
+      try {
+        await pushToFeishu(parseConfig(env), buildFailureAlertMessage(nextState, parseConfig(env).failureAlertThreshold));
+        nextState = { ...nextState, lastAlertAt: now.toISOString() };
+      } catch {
+        // ignore secondary alert failure
+      }
+    }
+    await setRuntimeState(env.RUNTIME_KV, nextState);
+    await setLastRunRecord(env.RUNTIME_KV, {
+      startedAt: now.toISOString(),
+      finishedAt: new Date().toISOString(),
+      status: 'failed',
+      trigger,
+      error: detail,
+    });
+    throw error;
+  }
+}
+
 export default {
-  async fetch(request: Request, env: Env): Promise<Response> {
+  async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const url = new URL(request.url);
     const config = parseConfig(env);
 
@@ -85,75 +139,31 @@ export default {
         lookbackDays: config.lookbackDays,
         heartbeatEnabled: config.heartbeatEnabled,
         runtimeState: await getRuntimeState(env.RUNTIME_KV),
+        lastRun: await getLastRunRecord(env.RUNTIME_KV),
       });
+    }
+
+    if (request.method === 'GET' && url.pathname === '/admin/last-run') {
+      const auth = authorizeAdminRequest(request, config.manualTriggerToken);
+      if (!auth.ok) return json({ ok: false, error: auth.error ?? 'unauthorized' }, auth.status);
+      return json({ ok: true, lastRun: await getLastRunRecord(env.RUNTIME_KV) });
     }
 
     if (request.method === 'POST' && url.pathname === '/admin/trigger') {
       const auth = authorizeAdminRequest(request, config.manualTriggerToken);
       if (!auth.ok) return json({ ok: false, error: auth.error ?? 'unauthorized' }, auth.status);
-      try {
-        const result = await runDailyDigest(env);
-        const runtime = await getRuntimeState(env.RUNTIME_KV);
-        let nextState = recordSuccess(runtime);
-        nextState = await maybeSendHeartbeat(env, nextState, new Date());
-        await setRuntimeState(env.RUNTIME_KV, nextState);
-        return json({
-          ok: true,
-          tradeDate: result.tradeDate,
-          reportUrl: result.reportUrl,
-          action: result.conclusion.action,
-          modelLabel: result.modelLabel,
-          fallbackUsed: result.conclusion.fallbackUsed,
-          fallbackReason: result.conclusion.fallbackReason,
-          llmBackend: result.conclusion.llmBackend,
-          upstreamError: result.conclusion.upstreamError,
-          messagePreview: result.messagePreview,
-          usedSources: result.context.usedSources,
-          missingSources: result.context.missingSources,
-        });
-      } catch (error) {
-        const detail = error instanceof Error ? error.message : String(error);
-        let nextState = recordFailure(await getRuntimeState(env.RUNTIME_KV), detail);
-        if (shouldSendFailureAlert(nextState, config.failureAlertThreshold, config.failureAlertCooldownMinutes, new Date())) {
-          try {
-            await pushToFeishu(config, buildFailureAlertMessage(nextState, config.failureAlertThreshold));
-            nextState = { ...nextState, lastAlertAt: new Date().toISOString() };
-          } catch {
-            // ignore secondary alert failure
-          }
-        }
-        await setRuntimeState(env.RUNTIME_KV, nextState);
-        return json({ ok: false, error: detail }, 500);
-      }
+      const startedAt = new Date().toISOString();
+      ctx.waitUntil(executeRunAndPersist(env, 'manual', new Date(startedAt)));
+      return json({ ok: true, accepted: true, status: 'started', startedAt });
     }
 
     return json({ ok: false, error: 'not found' }, 404);
   },
 
-  async scheduled(_controller: ScheduledController, env: Env): Promise<void> {
+  async scheduled(_controller: ScheduledController, env: Env, ctx: ExecutionContext): Promise<void> {
     const config = parseConfig(env);
     const now = new Date();
     if (!config.runWeekdays.includes(weekdayInZone(now, config.marketTimezone))) return;
-
-    const runtime = await getRuntimeState(env.RUNTIME_KV);
-    try {
-      await runDailyDigest(env, now);
-      let nextState = recordSuccess(runtime, now);
-      nextState = await maybeSendHeartbeat(env, nextState, now);
-      await setRuntimeState(env.RUNTIME_KV, nextState);
-    } catch (error) {
-      const detail = error instanceof Error ? error.message : String(error);
-      let nextState = recordFailure(runtime, detail, now);
-      if (shouldSendFailureAlert(nextState, config.failureAlertThreshold, config.failureAlertCooldownMinutes, now)) {
-        try {
-          await pushToFeishu(config, buildFailureAlertMessage(nextState, config.failureAlertThreshold));
-          nextState = { ...nextState, lastAlertAt: now.toISOString() };
-        } catch {
-          // ignore secondary alert failure
-        }
-      }
-      await setRuntimeState(env.RUNTIME_KV, nextState);
-      throw error;
-    }
+    ctx.waitUntil(executeRunAndPersist(env, 'scheduled', now));
   },
 };
