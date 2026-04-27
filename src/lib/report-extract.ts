@@ -32,7 +32,7 @@ function normalizeWhitespace(text: string): string {
 }
 
 function detectBodyStart(text: string): string {
-  const markers = ['今日结论', '市场判断', '投资动作', '核心依据', '风险提示', '摘要', '总结'];
+  const markers = ['一、核心判断', '今日结论', '市场判断', '投资动作', '核心依据', '风险提示', '简报摘要', '摘要', '总结'];
   for (const marker of markers) {
     const index = text.indexOf(marker);
     if (index >= 0) return text.slice(index);
@@ -40,10 +40,29 @@ function detectBodyStart(text: string): string {
   return text;
 }
 
+function cleanupLines(text: string): string {
+  const lines = text.split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .filter((line) => !/^生成时间[：:]/.test(line))
+    .filter((line) => !/^交易日期[：:]/.test(line))
+    .filter((line) => !/^模型[：:]/.test(line))
+    .filter((line) => !/^摘要：\s*(是|否)$/.test(line))
+    .filter((line) => !/详细版$/.test(line))
+    .filter((line) => !/日报详细版$/.test(line));
+
+  const deduped: string[] = [];
+  for (const line of lines) {
+    if (deduped.at(-1) === line) continue;
+    deduped.push(line);
+  }
+  return deduped.join('\n');
+}
+
 export function extractTextFromReport(content: string, maxChars: number): { extractedText: string; excerpt: string } {
   const looksLikeHtml = /<html|<body|<div|<p|<table/i.test(content);
   const raw = looksLikeHtml ? stripTags(content) : content;
-  const normalized = normalizeWhitespace(detectBodyStart(raw));
+  const normalized = cleanupLines(normalizeWhitespace(detectBodyStart(raw)));
   const extractedText = normalized.slice(0, maxChars).trim();
   const excerpt = extractedText.slice(0, 280).trim();
   return { extractedText, excerpt };

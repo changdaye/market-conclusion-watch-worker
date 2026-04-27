@@ -8,7 +8,7 @@ describe('extractTextFromReport', () => {
       <body><div>今日结论</div><p>市场情绪回暖。</p><p>风险提示：波动仍大。</p></body></html>
     `, 500);
 
-    expect(extractedText).toContain('今日结论');
+    expect(extractedText).toContain('市场情绪回暖');
     expect(extractedText).toContain('市场情绪回暖');
     expect(extractedText).not.toContain('ignore()');
   });

@@ -25,7 +25,9 @@ const SYSTEM_PROMPT = `你是一名中文财经策略编辑。你会基于最近
 3. keyDrivers 输出 2 到 4 条。
 4. riskWarnings 输出 1 到 3 条。
 5. 如果来源缺失或观点冲突明显，要在 riskWarnings 中明确说明。
-6. JSON 结构：{"marketView":string,"action":string,"actionRationale":string,"keyDrivers":string[],"riskWarnings":string[],"confidence":"high"|"medium"|"low"}`;
+6. marketView 必须是一句真正的市场结论，不能只是来源标题、报告标题、栏目名或原文小标题。
+7. 优先综合多个来源后的共识，不要直接复述任一来源标题。
+8. JSON 结构：{"marketView":string,"action":string,"actionRationale":string,"keyDrivers":string[],"riskWarnings":string[],"confidence":"high"|"medium"|"low"}`;
 
 function fallbackConclusion(context: AggregatedContext, reason?: string): MarketConclusion {
   return {
@@ -43,6 +45,8 @@ function fallbackConclusion(context: AggregatedContext, reason?: string): Market
     modelLabel: '',
     fallbackUsed: true,
     fallbackReason: reason,
+    llmBackend: 'fallback',
+    upstreamError: reason,
   };
 }
 
@@ -78,7 +82,7 @@ function extractJsonObject(content: string): string {
   return start >= 0 && end > start ? content.slice(start, end + 1) : content.trim();
 }
 
-function normalizeConclusion(parsed: any, modelLabel: string): MarketConclusion {
+function normalizeConclusion(parsed: any, modelLabel: string, llmBackend: 'proxy' | 'workers-ai', upstreamError?: string): MarketConclusion {
   const action = ACTIONS.includes(parsed?.action) ? parsed.action : '观望';
   const keyDrivers = Array.isArray(parsed?.keyDrivers) ? parsed.keyDrivers.map((item: unknown) => String(item).trim()).filter(Boolean).slice(0, 4) : [];
   const riskWarnings = Array.isArray(parsed?.riskWarnings) ? parsed.riskWarnings.map((item: unknown) => String(item).trim()).filter(Boolean).slice(0, 3) : [];
@@ -94,6 +98,8 @@ function normalizeConclusion(parsed: any, modelLabel: string): MarketConclusion 
     confidence,
     modelLabel,
     fallbackUsed: false,
+    llmBackend,
+    upstreamError,
   };
 }
 
@@ -136,7 +142,7 @@ async function summarizeWithOpenAICompatible(config: AppConfig, context: Aggrega
     : rawContent?.map((part) => part.text ?? '').join('').trim();
   if (!content) throw new Error('OpenAI-compatible response returned empty content');
   const parsed = JSON.parse(extractJsonObject(content));
-  return normalizeConclusion(parsed, `${formatModelLabel(config.llmModel)} (${OPENAI_COMPAT_REASONING_EFFORT})`);
+  return normalizeConclusion(parsed, `${formatModelLabel(config.llmModel)} (${OPENAI_COMPAT_REASONING_EFFORT})`, 'proxy');
 }
 
 async function summarizeWithWorkersAI(ai: Ai, model: string, context: AggregatedContext): Promise<MarketConclusion> {
@@ -151,11 +157,12 @@ async function summarizeWithWorkersAI(ai: Ai, model: string, context: Aggregated
   const content = result.response?.trim();
   if (!content) throw new Error('Workers AI returned empty response');
   const parsed = JSON.parse(extractJsonObject(content));
-  return normalizeConclusion(parsed, formatModelLabel(model));
+  return normalizeConclusion(parsed, formatModelLabel(model), 'workers-ai');
 }
 
 export async function summarizeWithLLM(config: AppConfig, ai: Ai | undefined, context: AggregatedContext): Promise<MarketConclusion> {
   let fallbackReason = '';
+  let proxyError = '';
   const fallback = () => fallbackConclusion(context, fallbackReason || undefined);
   if (!context.totalReports || !context.llmInput.trim()) {
     fallbackReason = '无可用 LLM 输入';
@@ -166,7 +173,8 @@ export async function summarizeWithLLM(config: AppConfig, ai: Ai | undefined, co
     try {
       return await summarizeWithOpenAICompatible(config, context);
     } catch (error) {
-      fallbackReason = `代理 LLM 失败：${error instanceof Error ? error.message : String(error)}`;
+      proxyError = error instanceof Error ? error.message : String(error);
+      fallbackReason = `代理 LLM 失败：${proxyError}`;
       console.error('OpenAI-compatible LLM failed', error instanceof Error ? error.message : String(error));
     }
   }
@@ -176,7 +184,7 @@ export async function summarizeWithLLM(config: AppConfig, ai: Ai | undefined, co
     return fallback();
   }
   try {
-    return await summarizeWithWorkersAI(ai, config.llmModel.startsWith('@cf/') ? config.llmModel : DEFAULT_WORKERS_AI_MODEL, context);
+    return await summarizeWithWorkersAI(ai, config.llmModel.startsWith('@cf/') ? config.llmModel : DEFAULT_WORKERS_AI_MODEL, context).then((result) => ({ ...result, upstreamError: proxyError || result.upstreamError }));
   } catch (error) {
     fallbackReason = fallbackReason ? `${fallbackReason}；Workers AI 失败：${error instanceof Error ? error.message : String(error)}` : `Workers AI 失败：${error instanceof Error ? error.message : String(error)}`;
     console.error('Workers AI LLM failed', error instanceof Error ? error.message : String(error));

@@ -105,6 +105,8 @@ export interface MarketConclusion {
   modelLabel: string;
   fallbackUsed: boolean;
   fallbackReason?: string;
+  llmBackend?: 'proxy' | 'workers-ai' | 'fallback';
+  upstreamError?: string;
 }
 
 export interface RuntimeState {

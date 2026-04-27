@@ -61,6 +61,7 @@ describe('summarizeWithLLM', () => {
     expect(result.action).toBe('观望');
     expect(result.modelLabel).toBe('GPT 5.4 (xhigh)');
     expect(result.fallbackUsed).toBe(false);
+    expect(result.llmBackend).toBe('proxy');
     const body = JSON.parse(fetchMock.mock.calls[0]?.[1]?.body as string);
     expect(body.model).toBe('gpt-5.4');
     expect(body.reasoning_effort).toBe('xhigh');
@@ -79,6 +80,8 @@ describe('summarizeWithLLM', () => {
     expect(result.action).toBe('偏防守');
     expect(result.modelLabel).toBe('Llama 3.2 1B Instruct');
     expect(result.fallbackUsed).toBe(false);
+    expect(result.llmBackend).toBe('workers-ai');
+    expect(result.upstreamError).toContain('bad gateway');
     expect(run).toHaveBeenCalledTimes(1);
   });
 });

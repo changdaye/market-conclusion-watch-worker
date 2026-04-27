@@ -105,6 +105,8 @@ export default {
           modelLabel: result.modelLabel,
           fallbackUsed: result.conclusion.fallbackUsed,
           fallbackReason: result.conclusion.fallbackReason,
+          llmBackend: result.conclusion.llmBackend,
+          upstreamError: result.conclusion.upstreamError,
           messagePreview: result.messagePreview,
           usedSources: result.context.usedSources,
           missingSources: result.context.missingSources,
