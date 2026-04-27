@@ -4,7 +4,7 @@ import { buildDailyMessage, buildFailureAlertMessage, buildHeartbeatMessage } fr
 import { buildDetailedReport } from './lib/report';
 import { buildDetailedReportPublicUrl, maybeHandleDetailedReportRequest, saveDetailedReportCopy } from './lib/report-storage';
 import { aggregateReports } from './lib/report-aggregate';
-import { getLastRunRecord, getRuntimeState, recordFailure, recordSuccess, setLastRunRecord, setRuntimeState, shouldSendFailureAlert, shouldSendHeartbeat } from './lib/runtime';
+import { getLastRunRecord, getRuntimeState, patchLastRunRecord, recordFailure, recordSuccess, setLastRunRecord, setRuntimeState, shouldSendFailureAlert, shouldSendHeartbeat } from './lib/runtime';
 import { formatDateInZone, weekdayInZone } from './lib/time';
 import { uploadDetailedReportToCos } from './services/cos';
 import { collectRecentSourceReports } from './services/cos-source';
@@ -26,11 +26,15 @@ export async function runDailyDigest(env: Env, now = new Date()): Promise<RunRes
   const config = parseConfig(env);
   assertRuntimeEnv(env, config);
   const tradeDate = formatDateInZone(now, config.marketTimezone);
+  await patchLastRunRecord(env.RUNTIME_KV, { phase: 'collecting_reports', phaseDetail: '读取 COS 最近 3 天详细报告' });
   const reports = await collectRecentSourceReports(config, now);
+  await patchLastRunRecord(env.RUNTIME_KV, { phase: 'aggregating_reports', phaseDetail: `已读取 ${reports.length} 份报告，开始聚合` });
   const context = aggregateReports(reports, config);
+  await patchLastRunRecord(env.RUNTIME_KV, { phase: 'summarizing_with_llm', phaseDetail: `纳入 ${context.totalReports} 份报告，覆盖 ${context.usedSources.length} 个来源` });
   const conclusion = await summarizeWithLLM(config, env.AI, context);
 
   let reportUrl: string | undefined;
+  await patchLastRunRecord(env.RUNTIME_KV, { phase: 'rendering_report', phaseDetail: `LLM 后端：${conclusion.llmBackend ?? 'fallback'}` });
   const report = buildDetailedReport({ generatedAt: now, tradeDate, conclusion, context });
   try {
     const uploaded = await uploadDetailedReportToCos(config, report, now);
@@ -40,6 +44,7 @@ export async function runDailyDigest(env: Env, now = new Date()): Promise<RunRes
     console.error('Failed to upload report to COS', error);
   }
 
+  await patchLastRunRecord(env.RUNTIME_KV, { phase: 'pushing_feishu', phaseDetail: reportUrl ? '详细版报告已生成，开始推送飞书' : '无详细版链接，开始推送飞书' });
   const messagePreview = buildDailyMessage(conclusion, reportUrl, buildSourceSummary(context.usedSources, context.missingSources));
   await pushToFeishu(config, messagePreview);
 
@@ -91,7 +96,7 @@ async function executeRunAndPersist(env: Env, trigger: 'manual' | 'scheduled', n
       usedSources: result.context.usedSources,
       missingSources: result.context.missingSources,
     };
-    await setLastRunRecord(env.RUNTIME_KV, record);
+    await setLastRunRecord(env.RUNTIME_KV, { ...record, phase: 'completed', phaseDetail: '后台任务已完成' });
   } catch (error) {
     const detail = error instanceof Error ? error.message : String(error);
     let nextState = recordFailure(runtime, detail, now);
@@ -109,6 +114,8 @@ async function executeRunAndPersist(env: Env, trigger: 'manual' | 'scheduled', n
       finishedAt: new Date().toISOString(),
       status: 'failed',
       trigger,
+      phase: 'failed',
+      phaseDetail: '后台任务执行失败',
       error: detail,
     });
     throw error;

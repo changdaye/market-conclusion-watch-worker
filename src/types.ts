@@ -114,6 +114,8 @@ export interface LastRunRecord {
   finishedAt?: string;
   status: 'running' | 'succeeded' | 'failed';
   trigger: 'manual' | 'scheduled';
+  phase?: string;
+  phaseDetail?: string;
   tradeDate?: string;
   reportUrl?: string;
   action?: InvestmentAction;

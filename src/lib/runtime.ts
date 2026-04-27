@@ -22,6 +22,13 @@ export async function setLastRunRecord(kv: KVNamespace, record: LastRunRecord): 
   await kv.put(LAST_RUN_KEY, JSON.stringify(record));
 }
 
+export async function patchLastRunRecord(kv: KVNamespace, patch: Partial<LastRunRecord>): Promise<LastRunRecord> {
+  const current = await getLastRunRecord(kv);
+  const next = { ...(current ?? {}), ...patch } as LastRunRecord;
+  await setLastRunRecord(kv, next);
+  return next;
+}
+
 export function recordSuccess(state: RuntimeState, now = new Date()): RuntimeState {
   return {
     ...state,
