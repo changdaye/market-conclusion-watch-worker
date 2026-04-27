@@ -26,7 +26,8 @@ export async function collectRecentSourceReports(config: AppConfig, now = new Da
       .filter((item) => REPORT_FILE_PATTERN.test(item.key))
       .map((item) => ({ ...item, generatedAt: parseTimestampFromKey(item.key) ?? item.lastModified }))
       .filter((item): item is typeof item & { generatedAt: string } => Boolean(item.generatedAt && isRecent(item.generatedAt, config.lookbackDays, now)))
-      .sort((a, b) => b.generatedAt.localeCompare(a.generatedAt));
+      .sort((a, b) => b.generatedAt.localeCompare(a.generatedAt))
+      .slice(0, config.maxReportsPerSource);
 
     for (const object of candidates) {
       const rawContent = await fetchCosObjectText(config, object.key);
