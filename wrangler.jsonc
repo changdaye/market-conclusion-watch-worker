@@ -11,7 +11,7 @@
   },
   "triggers": {
     "crons": [
-      "45 15 * * *"
+      "0 21 * * *"
     ]
   },
   "ai": {
@@ -25,8 +25,8 @@
     }
   ],
   "vars": {
-    "RUN_HOUR_LOCAL": "23",
-    "RUN_MINUTE_LOCAL": "45",
+    "RUN_HOUR_LOCAL": "5",
+    "RUN_MINUTE_LOCAL": "0",
     "RUN_WEEKDAYS": "0,1,2,3,4,5,6",
     "MARKET_TIMEZONE": "Asia/Shanghai",
     "WORKER_PUBLIC_BASE_URL": "https://market-conclusion-watch-worker.wanggejiancai822.workers.dev",

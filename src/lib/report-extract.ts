@@ -31,69 +31,10 @@ function normalizeWhitespace(text: string): string {
     .trim();
 }
 
-function detectBodyStart(text: string): string {
-  const markers = ['一、核心判断', '今日结论', '市场判断', '投资动作', '核心依据', '风险提示', '简报摘要', '摘要', '总结'];
-  for (const marker of markers) {
-    const index = text.indexOf(marker);
-    if (index >= 0) return text.slice(index);
-  }
-  return text;
-}
-
-function escapeRegex(input: string): string {
-  return input.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-}
-
-function extractSectionByHeading(text: string, heading: string): string | undefined {
-  const escaped = escapeRegex(heading);
-  const pattern = new RegExp(`${escaped}[\\s\\S]*?(?=\\n[一二三四五六七八九十]+、|$)`, 'm');
-  const match = text.match(pattern);
-  return match?.[0]?.trim();
-}
-
-function trimAShareMarginSentimentReport(text: string): string {
-  const sections = [
-    extractSectionByHeading(text, '一、核心判断'),
-    text.match(/情绪标签[：:].*/)?.[0]?.trim(),
-    text.match(/当前触发状态[：:].*/)?.[0]?.trim(),
-    text.match(/融资余额历史分位[：:].*/)?.[0]?.trim(),
-    text.match(/5日融资净买入历史分位[：:].*/)?.[0]?.trim(),
-    extractSectionByHeading(text, '四、今日 vs 昨日'),
-    extractSectionByHeading(text, '五、今日 vs 历史中位数 / 本月均值'),
-    extractSectionByHeading(text, '六、历史位置与预警解释'),
-    extractSectionByHeading(text, '七、观察与备注'),
-  ].filter(Boolean) as string[];
-
-  const joined = sections.join('\n\n').trim();
-  return joined || text;
-}
-
-function cleanupLines(text: string): string {
-  const lines = text.split('\n')
-    .map((line) => line.trim())
-    .filter(Boolean)
-    .filter((line) => !/^生成时间[：:]/.test(line))
-    .filter((line) => !/^交易日期[：:]/.test(line))
-    .filter((line) => !/^模型[：:]/.test(line))
-    .filter((line) => !/^摘要：\s*(是|否)$/.test(line))
-    .filter((line) => !/详细版$/.test(line))
-    .filter((line) => !/日报详细版$/.test(line));
-
-  const deduped: string[] = [];
-  for (const line of lines) {
-    if (deduped.at(-1) === line) continue;
-    deduped.push(line);
-  }
-  return deduped.join('\n');
-}
-
-export function extractTextFromReport(content: string, maxChars: number, sourcePrefix?: string): { extractedText: string; excerpt: string } {
+export function extractTextFromReport(content: string, maxChars: number): { extractedText: string; excerpt: string } {
   const looksLikeHtml = /<html|<body|<div|<p|<table/i.test(content);
   const raw = looksLikeHtml ? stripTags(content) : content;
-  let normalized = cleanupLines(normalizeWhitespace(detectBodyStart(raw)));
-  if (sourcePrefix === 'a-share-margin-sentiment-worker') {
-    normalized = trimAShareMarginSentimentReport(normalized);
-  }
+  const normalized = normalizeWhitespace(raw);
   const extractedText = normalized.slice(0, maxChars).trim();
   const excerpt = extractedText.slice(0, 280).trim();
   return { extractedText, excerpt };

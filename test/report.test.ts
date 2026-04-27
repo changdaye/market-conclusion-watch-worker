@@ -19,9 +19,9 @@ const context: AggregatedContext = {
     combinedText: '摘要',
     reports: [{
       sourcePrefix: 'jinshi-market-brief-worker',
-      key: 'jinshi-market-brief-worker/20260427101010.html',
+      key: 'jinshi-market-brief-worker/feishu-messages/20260427101010.txt',
       generatedAt: '2026-04-27T10:10:10Z',
-      publicUrl: 'https://example.com/jinshi-market-brief-worker/20260427101010.html',
+      publicUrl: 'https://example.com/jinshi-market-brief-worker/feishu-messages/20260427101010.txt',
       rawContent: '<p>摘要</p>',
       extractedText: '摘要',
       excerpt: '摘要',

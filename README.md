@@ -2,12 +2,12 @@
 
 一个基于 **Cloudflare Workers + KV + Workers AI / OpenAI-compatible LLM + 腾讯云 COS** 的市场综合判断日报项目。
 
-它会在深夜定时读取腾讯云 COS 中最近 3 天的多来源详细报告，提取正文、去重裁剪后交给大模型，生成 **市场判断 + 明确投资动作**，再推送飞书并上传新的详细版 HTML 报告。
+它会在每天凌晨 **05:00（Asia/Shanghai）** 定时读取 6 个来源项目各自 `feishu-messages/` 目录下最近几天的飞书短消息文本，做一次统一总结，再推送飞书并上传新的详细版 HTML 报告。
 
 ## 当前能力
 
-- 每天 **23:45（Asia/Shanghai）** 定时运行
-- 从 COS 存储桶 `cloudflare-static-1252612849` 读取最近 3 天报告
+- 每天 **05:00（Asia/Shanghai）** 定时运行
+- 从 COS 存储桶 `cloudflare-static-1252612849` 读取最近 3 天归档飞书消息
 - 固定覆盖 6 个上游前缀：
   - `a-share-margin-sentiment-worker`
   - `jinshi-market-brief-worker`
@@ -15,6 +15,7 @@
   - `reddit-stocks-digest-worker`
   - `taoguba-hot-topics-worker`
   - `trump-truth-social-digest-worker`
+- 每个来源从其目录下的 `feishu-messages/YYYYMMDDHHMMSS.txt` 读取消息
 - 生成 **标准型** 结论：市场判断 / 投资动作 / 核心依据 / 风险提示
 - 飞书短消息遵循现有规则：
   - 不显示顶部标题
@@ -25,20 +26,18 @@
 - 保留 `/health` 与 `/admin/trigger` 用于验收和手动触发
 - 支持心跳推送与连续失败告警
 
-## 详细报告来源
+## 数据来源
 
-默认从以下 COS 前缀读取详细报告：
+默认读取以下 6 个来源目录下的 `feishu-messages/`：
 
-- `a-share-margin-sentiment-worker`
-- `jinshi-market-brief-worker`
-- `portfolio-valuation-watch-worker`
-- `reddit-stocks-digest-worker`
-- `taoguba-hot-topics-worker`
-- `trump-truth-social-digest-worker`
+- `a-share-margin-sentiment-worker/feishu-messages/`
+- `jinshi-market-brief-worker/feishu-messages/`
+- `portfolio-valuation-watch-worker/feishu-messages/`
+- `reddit-stocks-digest-worker/feishu-messages/`
+- `taoguba-hot-topics-worker/feishu-messages/`
+- `trump-truth-social-digest-worker/feishu-messages/`
 
-默认按对象 key 时间戳筛选最近 3 天报告，兼容 `.html` / `.md` / `.txt` 文本类报告，主路径优先处理 HTML。
-
-为避免 Cloudflare Worker 单次调用的 subrequest 限制，当前默认每个来源最多读取最近 4 份详细报告。
+默认按对象 key 时间戳筛选最近 3 天消息文本，当前每个来源最多读取最近 1 条消息作为输入。
 
 ## 本地开发
 
@@ -62,18 +61,6 @@ curl http://127.0.0.1:8787/health
 curl -X POST   -H "Authorization: Bearer YOUR_MANUAL_TRIGGER_TOKEN"   https://<your-worker>/admin/trigger
 ```
 
-返回示例：
-
-```json
-{
-  "ok": true,
-  "tradeDate": "2026-04-27",
-  "reportUrl": "https://.../market-conclusion-watch-worker/20260427154530.html",
-  "action": "观望",
-  "messagePreview": "..."
-}
-```
-
 ## 环境变量
 
 敏感信息通过 `.dev.vars` 或 Cloudflare secrets 注入；不要提交到公开仓库。
@@ -81,10 +68,3 @@ curl -X POST   -H "Authorization: Bearer YOUR_MANUAL_TRIGGER_TOKEN"   https://<y
 参见：
 - `.dev.vars.example`
 - `wrangler.jsonc`
-
-## 风险说明
-
-- 上游详细报告的版式可能变化，正文抽取规则需要持续观察
-- 最近 3 天的全量报告可能出现观点冲突，模型会偏保守输出
-- 如果个别来源缺失，本次结论会继续生成，但会在报告里注明覆盖缺口
-- 当 OpenAI-compatible 代理异常时，会回退到 Cloudflare Workers AI

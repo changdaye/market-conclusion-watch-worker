@@ -29,7 +29,7 @@ export function buildDetailedReport(input: {
       <p class="meta">纳入 ${group.reports.length} 份报告</p>
       ${group.reports.length ? group.reports.map((report) => `
         <article class="source-item">
-          <div class="meta"><strong>${escapeHtml(report.generatedAt)}</strong> · <a href="${escapeHtml(report.publicUrl)}">原始详细报告</a></div>
+          <div class="meta"><strong>${escapeHtml(report.generatedAt)}</strong> · <a href="${escapeHtml(report.publicUrl)}">归档飞书消息</a></div>
           <pre>${escapeHtml(report.extractedText)}</pre>
         </article>
       `).join('') : '<p>本次未纳入该来源报告。</p>'}
