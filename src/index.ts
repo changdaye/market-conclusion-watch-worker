@@ -16,6 +16,17 @@ function json(data: Record<string, unknown>, status = 200): Response {
   return Response.json(data, { status });
 }
 
+
+function withSourcePrefixOverride(env: Env, request: Request): Env {
+  const url = new URL(request.url);
+  const raw = url.searchParams.get('source_prefixes')?.trim();
+  if (!raw) return env;
+  return {
+    ...env,
+    SOURCE_PREFIXES: raw,
+  } as Env;
+}
+
 function buildSourceSummary(usedSources: string[], missingSources: string[]): string {
   const used = `已覆盖 ${usedSources.length} 个来源：${usedSources.length ? usedSources.join(' / ') : '无'}`;
   const missing = `缺失 ${missingSources.length} 个来源：${missingSources.length ? missingSources.join(' / ') : '无'}`;
@@ -162,7 +173,7 @@ export default {
       const auth = authorizeAdminRequest(request, config.manualTriggerToken);
       if (!auth.ok) return json({ ok: false, error: auth.error ?? 'unauthorized' }, auth.status);
       const startedAt = new Date().toISOString();
-      ctx.waitUntil(executeRunAndPersist(env, 'manual', new Date(startedAt)));
+      ctx.waitUntil(executeRunAndPersist(withSourcePrefixOverride(env, request), 'manual', new Date(startedAt)));
       return json({ ok: true, accepted: true, status: 'started', startedAt });
     }
 
