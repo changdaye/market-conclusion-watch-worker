@@ -71,6 +71,51 @@ export async function runDailyDigest(env: Env, now = new Date()): Promise<RunRes
   };
 }
 
+
+async function runMinimalLlmProbe(env: Env, now = new Date()): Promise<RunResult> {
+  const config = parseConfig(env);
+  assertRuntimeEnv(env, config);
+  const tradeDate = formatDateInZone(now, config.marketTimezone);
+  const minimalText = `【今日结论】
+市场偏谨慎，但没有极端风险。`;
+  const context = {
+    groups: [{
+      sourcePrefix: 'debug-minimal',
+      reports: [{
+        sourcePrefix: 'debug-minimal',
+        key: 'debug-minimal/feishu-messages/20260427150000.txt',
+        generatedAt: now.toISOString(),
+        publicUrl: 'https://example.com/debug-minimal.txt',
+        rawContent: minimalText,
+        extractedText: minimalText,
+        excerpt: '【今日结论】市场偏谨慎，但没有极端风险。',
+      }],
+      combinedText: minimalText,
+    }],
+    llmInput: minimalText,
+    totalReports: 1,
+    usedSources: ['debug-minimal'],
+    missingSources: [],
+    droppedReportKeys: [],
+  };
+  await patchLastRunRecord(env.RUNTIME_KV, { phase: 'summarizing_with_llm', phaseDetail: '最小 prompt 探针' });
+  const conclusion = await summarizeWithLLM(config, env.AI, context, async (phaseDetail) => {
+    await patchLastRunRecord(env.RUNTIME_KV, { phase: 'summarizing_with_llm', phaseDetail: `最小 prompt 探针：${phaseDetail}` });
+  });
+  const report = buildDetailedReport({ generatedAt: now, tradeDate, conclusion, context });
+  let reportUrl: string | undefined;
+  try {
+    const uploaded = await uploadDetailedReportToCos(config, report, now);
+    await saveDetailedReportCopy(env.RUNTIME_KV, uploaded.key, report);
+    reportUrl = buildDetailedReportPublicUrl(config.workerPublicBaseUrl, uploaded.key);
+  } catch (error) {
+    console.error('Failed to upload probe report', error);
+  }
+  const messagePreview = buildDailyMessage(conclusion, reportUrl, buildSourceSummary(context.usedSources, context.missingSources));
+  await pushToFeishu(config, messagePreview);
+  return { tradeDate, reportUrl, messagePreview, modelLabel: conclusion.modelLabel, conclusion, context };
+}
+
 async function maybeSendHeartbeat(env: Env, state: RuntimeState, now: Date): Promise<RuntimeState> {
   const config = parseConfig(env);
   if (!config.heartbeatEnabled || !shouldSendHeartbeat(state, config.heartbeatIntervalHours, now)) return state;
@@ -173,7 +218,26 @@ export default {
       const auth = authorizeAdminRequest(request, config.manualTriggerToken);
       if (!auth.ok) return json({ ok: false, error: auth.error ?? 'unauthorized' }, auth.status);
       const startedAt = new Date().toISOString();
-      ctx.waitUntil(executeRunAndPersist(withSourcePrefixOverride(env, request), 'manual', new Date(startedAt)));
+      const manualEnv = withSourcePrefixOverride(env, request);
+      const probe = new URL(request.url).searchParams.get('debug_probe');
+      if (probe === 'minimal') {
+        ctx.waitUntil((async () => {
+          await setLastRunRecord(manualEnv.RUNTIME_KV, { startedAt, status: 'running', trigger: 'manual' });
+          const runtime = await getRuntimeState(manualEnv.RUNTIME_KV);
+          try {
+            const result = await runMinimalLlmProbe(manualEnv, new Date(startedAt));
+            const nextState = await maybeSendHeartbeat(manualEnv, recordSuccess(runtime, new Date(startedAt)), new Date(startedAt));
+            await setRuntimeState(manualEnv.RUNTIME_KV, nextState);
+            await setLastRunRecord(manualEnv.RUNTIME_KV, { startedAt, finishedAt: new Date().toISOString(), status: 'succeeded', trigger: 'manual', tradeDate: result.tradeDate, reportUrl: result.reportUrl, action: result.conclusion.action, modelLabel: result.modelLabel, fallbackUsed: result.conclusion.fallbackUsed, fallbackReason: result.conclusion.fallbackReason, llmBackend: result.conclusion.llmBackend, upstreamError: result.conclusion.upstreamError, messagePreview: result.messagePreview, usedSources: result.context.usedSources, missingSources: result.context.missingSources, phase: 'completed', phaseDetail: '最小 prompt 探针完成' });
+          } catch (error) {
+            const detail = error instanceof Error ? error.message : String(error);
+            await setRuntimeState(manualEnv.RUNTIME_KV, recordFailure(runtime, detail, new Date(startedAt)));
+            await setLastRunRecord(manualEnv.RUNTIME_KV, { startedAt, finishedAt: new Date().toISOString(), status: 'failed', trigger: 'manual', phase: 'failed', phaseDetail: '最小 prompt 探针失败', error: detail });
+          }
+        })());
+      } else {
+        ctx.waitUntil(executeRunAndPersist(manualEnv, 'manual', new Date(startedAt)));
+      }
       return json({ ok: true, accepted: true, status: 'started', startedAt });
     }
 
