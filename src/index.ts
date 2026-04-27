@@ -31,7 +31,9 @@ export async function runDailyDigest(env: Env, now = new Date()): Promise<RunRes
   await patchLastRunRecord(env.RUNTIME_KV, { phase: 'aggregating_reports', phaseDetail: `已读取 ${reports.length} 份报告，开始聚合` });
   const context = aggregateReports(reports, config);
   await patchLastRunRecord(env.RUNTIME_KV, { phase: 'summarizing_with_llm', phaseDetail: `纳入 ${context.totalReports} 份报告，覆盖 ${context.usedSources.length} 个来源` });
-  const conclusion = await summarizeWithLLM(config, env.AI, context);
+  const conclusion = await summarizeWithLLM(config, env.AI, context, async (phaseDetail) => {
+    await patchLastRunRecord(env.RUNTIME_KV, { phase: 'summarizing_with_llm', phaseDetail });
+  });
 
   let reportUrl: string | undefined;
   await patchLastRunRecord(env.RUNTIME_KV, { phase: 'rendering_report', phaseDetail: `LLM 后端：${conclusion.llmBackend ?? 'fallback'}` });

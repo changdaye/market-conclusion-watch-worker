@@ -24,6 +24,14 @@ interface SourceSummary {
   riskPoints: string[];
 }
 
+interface DailySummary {
+  sourceName: string;
+  tradeDay: string;
+  sourceView: string;
+  keyPoints: string[];
+  riskPoints: string[];
+}
+
 interface ModelCallResult<T> {
   value: T;
   backend: 'proxy' | 'workers-ai';
@@ -50,12 +58,12 @@ RISK_WARNINGS:
 - ...
 CONFIDENCE: high|medium|low`;
 
-const SOURCE_SYSTEM_PROMPT = `你是一名中文财经编辑。请阅读单一来源最近三天的材料，输出结构化标签文本，不要 markdown，不要代码块。
+const SOURCE_SYSTEM_PROMPT = `你是一名中文财经编辑。请阅读单一来源的材料，输出结构化标签文本，不要 markdown，不要代码块。
 
 要求：
-1. SOURCE_VIEW 用 1 句话概括该来源最近三天最重要的市场判断。
+1. SOURCE_VIEW 用 1 句话概括该批材料最重要的市场判断。
 2. KEY_POINTS 输出 2 到 4 条，聚焦真正影响市场的关键信号。
-3. RISK_POINTS 输出 1 到 3 条，聚焦该来源提示的主要风险或不确定性。
+3. RISK_POINTS 输出 1 到 3 条，聚焦主要风险或不确定性。
 4. 不要照抄报告标题，不要输出“详细版”“日报”等栏目名称。
 5. 严格按以下格式输出：
 SOURCE_VIEW: ...
@@ -243,23 +251,35 @@ async function invokeModel<T>(
   };
 }
 
-function buildSourcePrompt(group: SourceReportGroup): string {
-  const snippets = group.reports.map((report, index) => [
+function groupReportsByDay(group: SourceReportGroup): Array<{ day: string; reports: typeof group.reports }> {
+  const buckets = new Map<string, typeof group.reports>();
+  for (const report of group.reports) {
+    const day = report.generatedAt.slice(0, 10);
+    buckets.set(day, [...(buckets.get(day) ?? []), report]);
+  }
+  return [...buckets.entries()]
+    .sort((a, b) => b[0].localeCompare(a[0]))
+    .map(([day, reports]) => ({ day, reports }));
+}
+
+function buildDailyPrompt(sourcePrefix: string, day: string, reports: SourceReportGroup['reports']): string {
+  const snippets = reports.map((report, index) => [
     `材料 ${index + 1}`,
     `时间：${report.generatedAt}`,
     `摘要：${report.excerpt || report.extractedText}`,
   ].join('\n')).join('\n\n');
-  return `来源：${group.sourcePrefix}\n请基于以下最近三天材料做单来源总结：\n\n${snippets}`;
+  return `来源：${sourcePrefix}\n日期：${day}\n请基于以下当日材料做单日总结：\n\n${snippets}`;
 }
 
-function buildBatchPrompt(summaries: SourceSummary[]): string {
-  return summaries.map((summary, index) => [
-    `来源总结 ${index + 1}`,
-    `来源：${summary.sourceName}`,
+function buildSourcePrompt(sourceName: string, dailySummaries: DailySummary[]): string {
+  const chunks = dailySummaries.map((summary, index) => [
+    `单日总结 ${index + 1}`,
+    `日期：${summary.tradeDay}`,
     `观点：${summary.sourceView}`,
     `关键信号：${summary.keyPoints.join('；')}`,
     `风险：${summary.riskPoints.join('；')}`,
   ].join('\n')).join('\n\n');
+  return `来源：${sourceName}\n请把以下最近三天单日总结合并为一个来源总结：\n\n${chunks}`;
 }
 
 function buildFinalPrompt(context: AggregatedContext, summaries: SourceSummary[]): string {
@@ -267,32 +287,89 @@ function buildFinalPrompt(context: AggregatedContext, summaries: SourceSummary[]
     `已覆盖来源：${context.usedSources.join(' / ') || '无'}`,
     `缺失来源：${context.missingSources.join(' / ') || '无'}`,
   ].join('\n');
-  return `${coverage}\n\n${buildBatchPrompt(summaries)}`;
+  const sourceBlocks = summaries.map((summary, index) => [
+    `来源总结 ${index + 1}`,
+    `来源：${summary.sourceName}`,
+    `观点：${summary.sourceView}`,
+    `关键信号：${summary.keyPoints.join('；')}`,
+    `风险：${summary.riskPoints.join('；')}`,
+  ].join('\n')).join('\n\n');
+  return `${coverage}\n\n${sourceBlocks}`;
 }
 
-export async function summarizeWithLLM(config: AppConfig, ai: Ai | undefined, context: AggregatedContext): Promise<MarketConclusion> {
+export async function summarizeWithLLM(
+  config: AppConfig,
+  ai: Ai | undefined,
+  context: AggregatedContext,
+  onProgress?: (phaseDetail: string) => Promise<void> | void,
+): Promise<MarketConclusion> {
   if (!context.totalReports) return fallbackConclusion(context, '无可用 LLM 输入');
 
   try {
     const activeGroups = context.groups.filter((group) => group.reports.length > 0);
+    const sourceStageResults: SourceSummary[] = [];
+    let proxyErrors = '';
+    let backend: 'proxy' | 'workers-ai' = 'proxy';
 
-    const sourceStage = await Promise.all(activeGroups.map((group) => invokeModel(
-      config,
-      ai,
-      SOURCE_SYSTEM_PROMPT,
-      buildSourcePrompt(group),
-      (content) => normalizeSourceSummaryFromText(content, group.sourcePrefix),
-    )));
+    for (let sourceIndex = 0; sourceIndex < activeGroups.length; sourceIndex += 1) {
+      const group = activeGroups[sourceIndex]!;
+      const dailyGroups = groupReportsByDay(group);
+      const dailySummaries: DailySummary[] = [];
 
-    const proxyErrors = sourceStage.map((result) => result.proxyError).filter(Boolean).join('；');
-    const summaries = sourceStage.map((result) => result.value);
-    const backend: 'proxy' | 'workers-ai' = sourceStage.some((result) => result.backend === 'workers-ai') ? 'workers-ai' : 'proxy';
+      for (let dayIndex = 0; dayIndex < dailyGroups.length; dayIndex += 1) {
+        const dayGroup = dailyGroups[dayIndex]!;
+        await onProgress?.(`来源 ${sourceIndex + 1}/${activeGroups.length}：${group.sourcePrefix}，日期块 ${dayIndex + 1}/${dailyGroups.length}（${dayGroup.day}）`);
+        const dayResult = await invokeModel(
+          config,
+          ai,
+          SOURCE_SYSTEM_PROMPT,
+          buildDailyPrompt(group.sourcePrefix, dayGroup.day, dayGroup.reports),
+          (content) => {
+            const summary = normalizeSourceSummaryFromText(content, group.sourcePrefix);
+            return { ...summary, tradeDay: dayGroup.day } as DailySummary;
+          },
+        );
+        if (dayResult.proxyError) proxyErrors = proxyErrors ? `${proxyErrors}；${dayResult.proxyError}` : dayResult.proxyError;
+        if (dayResult.backend === 'workers-ai') backend = 'workers-ai';
+        dailySummaries.push(dayResult.value);
+      }
 
+      await onProgress?.(`来源 ${sourceIndex + 1}/${activeGroups.length}：${group.sourcePrefix}，合并最近三天单日总结`);
+      const sourceResult = await invokeModel(
+        config,
+        ai,
+        SOURCE_SYSTEM_PROMPT,
+        buildSourcePrompt(group.sourcePrefix, dailySummaries),
+        (content) => normalizeSourceSummaryFromText(content, group.sourcePrefix),
+      );
+      if (sourceResult.proxyError) proxyErrors = proxyErrors ? `${proxyErrors}；${sourceResult.proxyError}` : sourceResult.proxyError;
+      if (sourceResult.backend === 'workers-ai') backend = 'workers-ai';
+      sourceStageResults.push(sourceResult.value);
+    }
+
+    const sourceBatches = [sourceStageResults.slice(0, 3), sourceStageResults.slice(3)].filter((batch) => batch.length > 0);
+    const mergedBatchSummaries: SourceSummary[] = [];
+    for (let batchIndex = 0; batchIndex < sourceBatches.length; batchIndex += 1) {
+      const batch = sourceBatches[batchIndex]!;
+      await onProgress?.(`来源汇总批次 ${batchIndex + 1}/${sourceBatches.length}：合并 ${batch.length} 个来源总结`);
+      const batchStage = await invokeModel(
+        config,
+        ai,
+        SOURCE_SYSTEM_PROMPT,
+        `请把以下多个来源总结再压缩成一个更高层次的批次总结。批次：${batchIndex + 1}\n\n${buildFinalPrompt({ ...context, usedSources: [], missingSources: [] }, batch)}` ,
+        (content) => normalizeSourceSummaryFromText(content, `batch-${batchIndex + 1}`),
+      );
+      if (batchStage.proxyError) proxyErrors = proxyErrors ? `${proxyErrors}；${batchStage.proxyError}` : batchStage.proxyError;
+      if (batchStage.backend === 'workers-ai') backend = 'workers-ai';
+      mergedBatchSummaries.push(batchStage.value);
+    }
+
+    await onProgress?.(`最终综合 ${mergedBatchSummaries.length} 个批次总结`);
     const finalStage = await invokeModel(
       config,
       ai,
       FINAL_SYSTEM_PROMPT,
-      buildFinalPrompt(context, summaries),
+      buildFinalPrompt(context, mergedBatchSummaries),
       (content) => normalizeConclusionFromText(content, '', 'proxy'),
     );
 
