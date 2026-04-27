@@ -1,6 +1,6 @@
 import type { RuntimeState } from '../types';
 
-const KEY = 'runtime_state';
+const KEY = 'market-conclusion-watch-worker:runtime_state';
 
 export async function getRuntimeState(kv: KVNamespace): Promise<RuntimeState> {
   const raw = await kv.get(KEY);
