@@ -17,10 +17,9 @@ function json(data: Record<string, unknown>, status = 200): Response {
 }
 
 function buildSourceSummary(usedSources: string[], missingSources: string[]): string {
-  const used = usedSources.length ? `已覆盖：${usedSources.join(' / ')}` : '已覆盖：无';
-  const missing = missingSources.length ? `缺失：${missingSources.join(' / ')}` : '缺失：无';
-  return `${used}
-${missing}`;
+  const used = `已覆盖 ${usedSources.length} 个来源：${usedSources.length ? usedSources.join(' / ') : '无'}`;
+  const missing = `缺失 ${missingSources.length} 个来源：${missingSources.length ? missingSources.join(' / ') : '无'}`;
+  return `${used}\n${missing}`;
 }
 
 export async function runDailyDigest(env: Env, now = new Date()): Promise<RunResult> {
@@ -104,6 +103,8 @@ export default {
           reportUrl: result.reportUrl,
           action: result.conclusion.action,
           modelLabel: result.modelLabel,
+          fallbackUsed: result.conclusion.fallbackUsed,
+          fallbackReason: result.conclusion.fallbackReason,
           messagePreview: result.messagePreview,
           usedSources: result.context.usedSources,
           missingSources: result.context.missingSources,

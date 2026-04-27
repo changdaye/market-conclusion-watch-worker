@@ -104,6 +104,7 @@ export interface MarketConclusion {
   confidence: 'high' | 'medium' | 'low';
   modelLabel: string;
   fallbackUsed: boolean;
+  fallbackReason?: string;
 }
 
 export interface RuntimeState {

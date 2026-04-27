@@ -5,13 +5,18 @@ function section(title: string, body: string): string {
 }
 
 export function buildDailyMessage(conclusion: MarketConclusion, reportUrl: string | undefined, sourceSummary: string): string {
+  const riskLines = [...conclusion.riskWarnings];
+  if (conclusion.fallbackUsed && conclusion.fallbackReason) {
+    riskLines.push(`本次为规则兜底：${conclusion.fallbackReason}`);
+  }
   const parts = [
     ...(conclusion.modelLabel ? [`🤖 模型：${conclusion.modelLabel}`] : []),
-    section('市场判断', conclusion.marketView),
-    section('投资动作', `${conclusion.action}\n${conclusion.actionRationale}`),
-    section('核心依据', conclusion.keyDrivers.map((item) => `- ${item}`).join('\n')),
-    section('风险提示', conclusion.riskWarnings.map((item) => `- ${item}`).join('\n')),
-    section('关注代码', '无（本项目输出市场级动作建议，不提供个股代码）'),
+    ...(!conclusion.modelLabel && conclusion.fallbackUsed ? ['🤖 模型：规则兜底'] : []),
+    section('综合结论', conclusion.marketView),
+    section('操作建议', `${conclusion.action}\n${conclusion.actionRationale}`),
+    section('关键信号', conclusion.keyDrivers.map((item) => `- ${item}`).join('\n')),
+    section('主要风险', riskLines.map((item) => `- ${item}`).join('\n')),
+    section('关注代码', '市场级结论，无个股代码'),
     section('来源覆盖', sourceSummary),
   ];
   if (reportUrl) parts.push(`详细版报告:\n${reportUrl}`);

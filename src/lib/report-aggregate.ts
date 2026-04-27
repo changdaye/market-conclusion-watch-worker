@@ -34,10 +34,11 @@ export function aggregateReports(reports: SourceReport[], config: AppConfig): Ag
         continue;
       }
       const clipped = clampText(report.extractedText, room);
+      const llmSnippet = clampText(report.excerpt || report.extractedText, Math.min(1800, room));
       reportsForGroup.push({ ...report, extractedText: clipped, excerpt: clampText(report.excerpt, 280) });
-      parts.push(`## ${report.generatedAt} | ${report.key}\n${clipped}`);
-      sourceChars += clipped.length;
-      remainingTotalChars -= clipped.length;
+      parts.push(`## ${report.generatedAt} | ${report.key}\n${llmSnippet}`);
+      sourceChars += llmSnippet.length;
+      remainingTotalChars -= llmSnippet.length;
     }
 
     groups.push({

@@ -22,8 +22,8 @@ describe('message builders', () => {
   it('keeps the preferred Feishu report footer', () => {
     const text = buildDailyMessage(conclusion, 'https://example.com/report.html', '已覆盖：jinshi\n缺失：reddit');
     expect(text).toContain('🤖 模型：GPT 5.4 (xhigh)');
-    expect(text).toContain('【市场判断】');
-    expect(text).toContain('【投资动作】');
+    expect(text).toContain('【综合结论】');
+    expect(text).toContain('【操作建议】');
     expect(text).toContain('【关注代码】');
     expect(text).toContain('详细版报告:\nhttps://example.com/report.html');
   });

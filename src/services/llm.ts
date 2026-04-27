@@ -27,7 +27,7 @@ const SYSTEM_PROMPT = `你是一名中文财经策略编辑。你会基于最近
 5. 如果来源缺失或观点冲突明显，要在 riskWarnings 中明确说明。
 6. JSON 结构：{"marketView":string,"action":string,"actionRationale":string,"keyDrivers":string[],"riskWarnings":string[],"confidence":"high"|"medium"|"low"}`;
 
-function fallbackConclusion(context: AggregatedContext): MarketConclusion {
+function fallbackConclusion(context: AggregatedContext, reason?: string): MarketConclusion {
   return {
     marketView: context.totalReports ? '最近三天的多来源信息存在分化，短期更适合保持审慎。' : '最近三天可用来源不足，当前缺乏足够材料支撑积极判断。',
     action: context.totalReports ? '观望' : '偏防守',
@@ -42,6 +42,7 @@ function fallbackConclusion(context: AggregatedContext): MarketConclusion {
     confidence: context.totalReports >= 4 ? 'medium' : 'low',
     modelLabel: '',
     fallbackUsed: true,
+    fallbackReason: reason,
   };
 }
 
@@ -154,22 +155,31 @@ async function summarizeWithWorkersAI(ai: Ai, model: string, context: Aggregated
 }
 
 export async function summarizeWithLLM(config: AppConfig, ai: Ai | undefined, context: AggregatedContext): Promise<MarketConclusion> {
-  const fallback = fallbackConclusion(context);
-  if (!context.totalReports || !context.llmInput.trim()) return fallback;
+  let fallbackReason = '';
+  const fallback = () => fallbackConclusion(context, fallbackReason || undefined);
+  if (!context.totalReports || !context.llmInput.trim()) {
+    fallbackReason = '无可用 LLM 输入';
+    return fallback();
+  }
 
   if (config.llmBaseUrl && config.llmApiKey) {
     try {
       return await summarizeWithOpenAICompatible(config, context);
     } catch (error) {
+      fallbackReason = `代理 LLM 失败：${error instanceof Error ? error.message : String(error)}`;
       console.error('OpenAI-compatible LLM failed', error instanceof Error ? error.message : String(error));
     }
   }
 
-  if (!ai) return fallback;
+  if (!ai) {
+    fallbackReason ||= 'Workers AI 绑定不可用';
+    return fallback();
+  }
   try {
     return await summarizeWithWorkersAI(ai, config.llmModel.startsWith('@cf/') ? config.llmModel : DEFAULT_WORKERS_AI_MODEL, context);
   } catch (error) {
+    fallbackReason = fallbackReason ? `${fallbackReason}；Workers AI 失败：${error instanceof Error ? error.message : String(error)}` : `Workers AI 失败：${error instanceof Error ? error.message : String(error)}`;
     console.error('Workers AI LLM failed', error instanceof Error ? error.message : String(error));
-    return fallback;
+    return fallback();
   }
 }
