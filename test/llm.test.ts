@@ -69,7 +69,7 @@ describe('summarizeWithLLM', () => {
 
   it('falls back to Workers AI when the proxy fails', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('bad gateway', { status: 502 })));
-    const run = vi.fn().mockResolvedValue({ response: '{"marketView":"短期波动仍大。","action":"偏防守","actionRationale":"缺失来源较多。","keyDrivers":["波动较大"],"riskWarnings":["缺失来源"],"confidence":"low"}' });
+    const run = vi.fn().mockResolvedValue({ response: 'MARKET_VIEW: 短期波动仍大。\nACTION: 偏防守\nRATIONALE: 缺失来源较多。\nKEY_DRIVERS:\n- 波动较大\nRISK_WARNINGS:\n- 缺失来源\nCONFIDENCE: low' });
 
     const result = await summarizeWithLLM(
       { ...makeConfig(), llmBaseUrl: 'https://proxy.example.com/v1', llmApiKey: 'proxy-key', llmModel: 'gpt-5.4' },

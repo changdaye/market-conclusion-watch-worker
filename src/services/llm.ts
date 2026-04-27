@@ -31,30 +31,41 @@ interface ModelCallResult<T> {
   proxyError?: string;
 }
 
-const FINAL_SYSTEM_PROMPT = `你是一名中文财经策略编辑。你会基于最近三天的多来源市场总结，输出一个严格 JSON 对象，不要 markdown，不要代码块。
+const FINAL_SYSTEM_PROMPT = `你是一名中文财经策略编辑。你会基于最近三天的多来源市场总结，输出结构化标签文本，不要 markdown，不要代码块。
 
 要求：
 1. 只做市场级/组合级判断，不给个股买卖指令。
-2. action 必须是以下枚举之一：观望、轻仓试探、分批布局、持有等待、降低仓位、偏防守。
-3. marketView 必须是一句真正的综合结论，不能只是来源标题、报告标题、栏目名或原文小标题。
-4. keyDrivers 输出 2 到 4 条，riskWarnings 输出 1 到 3 条。
+2. ACTION 必须是以下枚举之一：观望、轻仓试探、分批布局、持有等待、降低仓位、偏防守。
+3. MARKET_VIEW 必须是一句真正的综合结论，不能只是来源标题、报告标题、栏目名或原文小标题。
+4. KEY_DRIVERS 输出 2 到 4 条，RISK_WARNINGS 输出 1 到 3 条。
 5. 优先综合多个来源的共识与冲突，不要直接复述任一来源标题。
-6. JSON 结构：{"marketView":string,"action":string,"actionRationale":string,"keyDrivers":string[],"riskWarnings":string[],"confidence":"high"|"medium"|"low"}`;
+6. 严格按以下格式输出：
+MARKET_VIEW: ...
+ACTION: ...
+RATIONALE: ...
+KEY_DRIVERS:
+- ...
+- ...
+RISK_WARNINGS:
+- ...
+- ...
+CONFIDENCE: high|medium|low`;
 
-const SOURCE_SYSTEM_PROMPT = `你是一名中文财经编辑。请阅读单一来源最近三天的材料，输出严格 JSON，不要 markdown，不要代码块。
+const SOURCE_SYSTEM_PROMPT = `你是一名中文财经编辑。请阅读单一来源最近三天的材料，输出结构化标签文本，不要 markdown，不要代码块。
 
 要求：
-1. sourceView 用 1 句话概括该来源最近三天最重要的市场判断。
-2. keyPoints 输出 2 到 4 条，聚焦真正影响市场的关键信号。
-3. riskPoints 输出 1 到 3 条，聚焦该来源提示的主要风险或不确定性。
+1. SOURCE_VIEW 用 1 句话概括该来源最近三天最重要的市场判断。
+2. KEY_POINTS 输出 2 到 4 条，聚焦真正影响市场的关键信号。
+3. RISK_POINTS 输出 1 到 3 条，聚焦该来源提示的主要风险或不确定性。
 4. 不要照抄报告标题，不要输出“详细版”“日报”等栏目名称。
-5. JSON 结构：{"sourceView":string,"keyPoints":string[],"riskPoints":string[]}`;
-
-const REPAIR_SYSTEM_PROMPT = `你是 JSON 修复器。请把用户给出的内容修复为严格合法的 JSON。
-要求：
-1. 只能输出修复后的 JSON 本身。
-2. 不要解释，不要 markdown，不要代码块。
-3. 尽量保持原意，只修语法。`;
+5. 严格按以下格式输出：
+SOURCE_VIEW: ...
+KEY_POINTS:
+- ...
+- ...
+RISK_POINTS:
+- ...
+- ...`;
 
 function fallbackConclusion(context: AggregatedContext, reason?: string): MarketConclusion {
   return {
@@ -101,51 +112,33 @@ function formatModelLabel(model: string): string {
     .join(' ');
 }
 
-function extractJsonObject(content: string): string {
-  const fenced = content.match(/```(?:json)?\s*([\s\S]*?)```/i)?.[1];
-  const source = (fenced ?? content).trim();
-  const start = source.indexOf('{');
-  if (start < 0) return source;
-  let depth = 0;
-  let inString = false;
-  let escaped = false;
-  for (let index = start; index < source.length; index += 1) {
-    const char = source[index]!;
-    if (inString) {
-      if (escaped) {
-        escaped = false;
-      } else if (char === '\\') {
-        escaped = true;
-      } else if (char === '"') {
-        inString = false;
-      }
-      continue;
-    }
-    if (char === '"') {
-      inString = true;
-      continue;
-    }
-    if (char === '{') depth += 1;
-    if (char === '}') {
-      depth -= 1;
-      if (depth === 0) return source.slice(start, index + 1);
-    }
-  }
-  const end = source.lastIndexOf('}');
-  return end > start ? source.slice(start, end + 1) : source.slice(start);
+function parseBullets(block: string): string[] {
+  return block
+    .split('\n')
+    .map((line) => line.trim())
+    .filter((line) => line.startsWith('- '))
+    .map((line) => line.slice(2).trim())
+    .filter(Boolean);
 }
 
-function normalizeConclusion(parsed: any, modelLabel: string, llmBackend: 'proxy' | 'workers-ai', upstreamError?: string): MarketConclusion {
-  const action = ACTIONS.includes(parsed?.action) ? parsed.action : '观望';
-  const keyDrivers = Array.isArray(parsed?.keyDrivers) ? parsed.keyDrivers.map((item: unknown) => String(item).trim()).filter(Boolean).slice(0, 4) : [];
-  const riskWarnings = Array.isArray(parsed?.riskWarnings) ? parsed.riskWarnings.map((item: unknown) => String(item).trim()).filter(Boolean).slice(0, 3) : [];
-  const confidence = parsed?.confidence === 'high' || parsed?.confidence === 'medium' || parsed?.confidence === 'low'
-    ? parsed.confidence
-    : 'medium';
+function extractSection(content: string, key: string): string {
+  const regex = new RegExp(`${key}:\\s*([\\s\\S]*?)(?=\\n[A-Z_]+:|$)`, 'i');
+  return content.match(regex)?.[1]?.trim() ?? '';
+}
+
+function normalizeConclusionFromText(content: string, modelLabel: string, llmBackend: 'proxy' | 'workers-ai', upstreamError?: string): MarketConclusion {
+  const marketView = extractSection(content, 'MARKET_VIEW').split('\n')[0]?.trim() || '市场信息分化，短期更适合保持审慎。';
+  const actionRaw = extractSection(content, 'ACTION').split('\n')[0]?.trim() || '观望';
+  const action = ACTIONS.includes(actionRaw as InvestmentAction) ? actionRaw as InvestmentAction : '观望';
+  const rationale = extractSection(content, 'RATIONALE').split('\n')[0]?.trim() || '当前跨来源信号不够一致，先控制动作强度。';
+  const keyDrivers = parseBullets(extractSection(content, 'KEY_DRIVERS')).slice(0, 4);
+  const riskWarnings = parseBullets(extractSection(content, 'RISK_WARNINGS')).slice(0, 3);
+  const confidenceRaw = extractSection(content, 'CONFIDENCE').split('\n')[0]?.trim().toLowerCase();
+  const confidence = confidenceRaw === 'high' || confidenceRaw === 'medium' || confidenceRaw === 'low' ? confidenceRaw : 'medium';
   return {
-    marketView: String(parsed?.marketView ?? '').trim() || '市场信息分化，短期更适合保持审慎。',
+    marketView,
     action,
-    actionRationale: String(parsed?.actionRationale ?? '').trim() || '当前跨来源信号不够一致，先控制动作强度。',
+    actionRationale: rationale,
     keyDrivers: keyDrivers.length ? keyDrivers : ['最近三天多来源信息存在分化。'],
     riskWarnings: riskWarnings.length ? riskWarnings : ['请结合后续新报告与市场变化持续复核。'],
     confidence,
@@ -156,12 +149,13 @@ function normalizeConclusion(parsed: any, modelLabel: string, llmBackend: 'proxy
   };
 }
 
-function normalizeSourceSummary(parsed: any, sourceName: string): SourceSummary {
-  const keyPoints = Array.isArray(parsed?.keyPoints) ? parsed.keyPoints.map((item: unknown) => String(item).trim()).filter(Boolean).slice(0, 4) : [];
-  const riskPoints = Array.isArray(parsed?.riskPoints) ? parsed.riskPoints.map((item: unknown) => String(item).trim()).filter(Boolean).slice(0, 3) : [];
+function normalizeSourceSummaryFromText(content: string, sourceName: string): SourceSummary {
+  const sourceView = extractSection(content, 'SOURCE_VIEW').split('\n')[0]?.trim() || `${sourceName} 近三天观点偏中性。`;
+  const keyPoints = parseBullets(extractSection(content, 'KEY_POINTS')).slice(0, 4);
+  const riskPoints = parseBullets(extractSection(content, 'RISK_POINTS')).slice(0, 3);
   return {
     sourceName,
-    sourceView: String(parsed?.sourceView ?? '').trim() || `${sourceName} 近三天观点偏中性。`,
+    sourceView,
     keyPoints: keyPoints.length ? keyPoints : ['该来源未提供足够清晰的关键信号。'],
     riskPoints: riskPoints.length ? riskPoints : ['该来源风险提示有限，需要结合其他来源复核。'],
   };
@@ -222,32 +216,18 @@ async function callWorkersAI(ai: Ai, model: string, systemPrompt: string, userCo
   return content;
 }
 
-async function parseWithRepair<T>(
-  rawContent: string,
-  parse: (parsed: any) => T,
-  repair: () => Promise<string>,
-): Promise<T> {
-  try {
-    return parse(JSON.parse(extractJsonObject(rawContent)));
-  } catch {
-    const repaired = await repair();
-    return parse(JSON.parse(extractJsonObject(repaired)));
-  }
-}
-
 async function invokeModel<T>(
   config: AppConfig,
   ai: Ai | undefined,
   systemPrompt: string,
   userContent: string,
-  parse: (parsed: any) => T,
+  parse: (content: string) => T,
 ): Promise<ModelCallResult<T>> {
   let proxyError = '';
   if (config.llmBaseUrl && config.llmApiKey) {
     try {
       const content = await callOpenAICompatible(config, systemPrompt, userContent);
-      const value = await parseWithRepair(content, parse, () => callOpenAICompatible(config, REPAIR_SYSTEM_PROMPT, `请修复下面的 JSON：\n${content}`));
-      return { value, backend: 'proxy' };
+      return { value: parse(content), backend: 'proxy' };
     } catch (error) {
       proxyError = error instanceof Error ? error.message : String(error);
       console.error('OpenAI-compatible LLM failed', proxyError);
@@ -257,9 +237,8 @@ async function invokeModel<T>(
   if (!ai) throw new Error(proxyError || 'Workers AI binding unavailable');
   const model = config.llmModel.startsWith('@cf/') ? config.llmModel : DEFAULT_WORKERS_AI_MODEL;
   const content = await callWorkersAI(ai, model, systemPrompt, userContent);
-  const value = await parseWithRepair(content, parse, () => callWorkersAI(ai, model, REPAIR_SYSTEM_PROMPT, `请修复下面的 JSON：\n${content}`));
   return {
-    value,
+    value: parse(content),
     backend: 'workers-ai',
     proxyError,
   };
@@ -309,7 +288,7 @@ export async function summarizeWithLLM(config: AppConfig, ai: Ai | undefined, co
       ai,
       SOURCE_SYSTEM_PROMPT,
       buildSourcePrompt(group),
-      (parsed) => normalizeSourceSummary(parsed, group.sourcePrefix),
+      (content) => normalizeSourceSummaryFromText(content, group.sourcePrefix),
     )));
 
     let proxyErrors = sourceStage.map((result) => result.proxyError).filter(Boolean).join('；');
@@ -323,7 +302,7 @@ export async function summarizeWithLLM(config: AppConfig, ai: Ai | undefined, co
         ai,
         SOURCE_SYSTEM_PROMPT,
         `请把以下多个来源总结再压缩成一个更高层次的阶段总结。阶段：${index + 1}\n\n${buildBatchPrompt(batch)}`,
-        (parsed) => normalizeSourceSummary(parsed, `stage-${index + 1}`),
+        (content) => normalizeSourceSummaryFromText(content, `stage-${index + 1}`),
       )));
       const batchErrors = batchStage.map((result) => result.proxyError).filter(Boolean).join('；');
       if (batchErrors) proxyErrors = proxyErrors ? `${proxyErrors}；${batchErrors}` : batchErrors;
@@ -336,7 +315,7 @@ export async function summarizeWithLLM(config: AppConfig, ai: Ai | undefined, co
       ai,
       FINAL_SYSTEM_PROMPT,
       buildFinalPrompt(context, summaries),
-      (parsed) => normalizeConclusion(parsed, '', 'proxy'),
+      (content) => normalizeConclusionFromText(content, '', 'proxy'),
     );
 
     if (finalStage.proxyError) proxyErrors = proxyErrors ? `${proxyErrors}；${finalStage.proxyError}` : finalStage.proxyError;
