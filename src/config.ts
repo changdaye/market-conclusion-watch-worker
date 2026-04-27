@@ -54,7 +54,7 @@ export function parseConfig(env: Partial<Env>): AppConfig {
     lookbackDays: toInt(env.LOOKBACK_DAYS, 3, 1),
     llmModel: env.LLM_MODEL?.trim() || '@cf/meta/llama-3.1-8b-instruct',
     sourcePrefixes: toPrefixes(env.SOURCE_PREFIXES),
-    maxReportsPerSource: toInt(env.MAX_REPORTS_PER_SOURCE, 12, 1),
+    maxReportsPerSource: toInt(env.MAX_REPORTS_PER_SOURCE, 4, 1),
     maxReportChars: toInt(env.MAX_REPORT_CHARS, 6000, 500),
     maxSourceChars: toInt(env.MAX_SOURCE_CHARS, 12000, 1000),
     maxTotalChars: toInt(env.MAX_TOTAL_CHARS, 48000, 2000),

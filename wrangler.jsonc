@@ -38,7 +38,7 @@
     "LOOKBACK_DAYS": "3",
     "LLM_MODEL": "gpt-5.4",
     "SOURCE_PREFIXES": "a-share-margin-sentiment-worker,jinshi-market-brief-worker,portfolio-valuation-watch-worker,reddit-stocks-digest-worker,taoguba-hot-topics-worker,trump-truth-social-digest-worker",
-    "MAX_REPORTS_PER_SOURCE": "12",
+    "MAX_REPORTS_PER_SOURCE": "4",
     "MAX_REPORT_CHARS": "6000",
     "MAX_SOURCE_CHARS": "12000",
     "MAX_TOTAL_CHARS": "48000",

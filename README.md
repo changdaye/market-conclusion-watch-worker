@@ -38,6 +38,8 @@
 
 默认按对象 key 时间戳筛选最近 3 天报告，兼容 `.html` / `.md` / `.txt` 文本类报告，主路径优先处理 HTML。
 
+为避免 Cloudflare Worker 单次调用的 subrequest 限制，当前默认每个来源最多读取最近 4 份详细报告。
+
 ## 本地开发
 
 ```bash
