@@ -1,0 +1,47 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "market-conclusion-watch-worker",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-04-27",
+  "account_id": "905ebcafff7f6fb7c62a6226887da305",
+  "workers_dev": true,
+  "preview_urls": false,
+  "observability": {
+    "enabled": true
+  },
+  "triggers": {
+    "crons": [
+      "45 15 * * *"
+    ]
+  },
+  "ai": {
+    "binding": "AI"
+  },
+  "kv_namespaces": [
+    {
+      "binding": "RUNTIME_KV",
+      "id": "4f410000a50044eb9f48be261b3dce3e",
+      "preview_id": "273f01a841f34e7f8a3bc66863a8be00"
+    }
+  ],
+  "vars": {
+    "RUN_HOUR_LOCAL": "23",
+    "RUN_MINUTE_LOCAL": "45",
+    "RUN_WEEKDAYS": "0,1,2,3,4,5,6",
+    "MARKET_TIMEZONE": "Asia/Shanghai",
+    "WORKER_PUBLIC_BASE_URL": "https://market-conclusion-watch-worker.wanggejiancai822.workers.dev",
+    "REQUEST_TIMEOUT_MS": "20000",
+    "HEARTBEAT_INTERVAL_HOURS": "24",
+    "HEARTBEAT_ENABLED": "true",
+    "FAILURE_ALERT_THRESHOLD": "3",
+    "FAILURE_ALERT_COOLDOWN_MINUTES": "360",
+    "LOOKBACK_DAYS": "3",
+    "LLM_MODEL": "gpt-5.4",
+    "SOURCE_PREFIXES": "a-share-margin-sentiment-worker,jinshi-market-brief-worker,portfolio-valuation-watch-worker,reddit-stocks-digest-worker,taoguba-hot-topics-worker,trump-truth-social-digest-worker",
+    "MAX_REPORTS_PER_SOURCE": "12",
+    "MAX_REPORT_CHARS": "6000",
+    "MAX_SOURCE_CHARS": "12000",
+    "MAX_TOTAL_CHARS": "48000",
+    "TENCENT_COS_BUCKET": "cloudflare-static-1252612849"
+  }
+}

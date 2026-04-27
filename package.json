@@ -1,0 +1,21 @@
+{
+  "name": "market-conclusion-watch-worker",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Cloudflare Worker that reads recent COS reports, synthesizes a market conclusion, and pushes Feishu updates.",
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "npm run check:cloudflare-account && wrangler deploy",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit",
+    "check": "npm run typecheck && npm run test",
+    "check:cloudflare-account": "node scripts/check-cloudflare-account.mjs"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "4.20260422.1",
+    "typescript": "6.0.3",
+    "vitest": "4.1.5",
+    "wrangler": "4.84.1"
+  }
+}
