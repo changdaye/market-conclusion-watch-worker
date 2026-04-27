@@ -31,7 +31,7 @@ export async function collectRecentSourceReports(config: AppConfig, now = new Da
 
     for (const object of candidates) {
       const rawContent = await fetchCosObjectText(config, object.key);
-      const { extractedText, excerpt } = extractTextFromReport(rawContent, config.maxReportChars);
+      const { extractedText, excerpt } = extractTextFromReport(rawContent, config.maxReportChars, prefix);
       if (!extractedText) continue;
       reports.push({
         sourcePrefix: prefix,
