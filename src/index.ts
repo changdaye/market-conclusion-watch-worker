@@ -26,7 +26,7 @@ export async function runDailyDigest(env: Env, now = new Date()): Promise<RunRes
   const config = parseConfig(env);
   assertRuntimeEnv(env, config);
   const tradeDate = formatDateInZone(now, config.marketTimezone);
-  await patchLastRunRecord(env.RUNTIME_KV, { phase: 'collecting_reports', phaseDetail: '读取 COS 最近 3 天详细报告' });
+  await patchLastRunRecord(env.RUNTIME_KV, { phase: 'collecting_reports', phaseDetail: '读取 COS 最近 3 天飞书消息归档' });
   const reports = await collectRecentSourceReports(config, now);
   await patchLastRunRecord(env.RUNTIME_KV, { phase: 'aggregating_reports', phaseDetail: `已读取 ${reports.length} 份报告，开始聚合` });
   const context = aggregateReports(reports, config);

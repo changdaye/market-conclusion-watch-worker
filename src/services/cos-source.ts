@@ -3,10 +3,10 @@ import { daysAgo } from '../lib/time';
 import type { AppConfig, SourceReport } from '../types';
 import { fetchCosObjectText, listCosObjects } from './cos';
 
-const REPORT_FILE_PATTERN = /(\d{14})\.(html?|md|txt)$/i;
+const FEISHU_MESSAGE_FILE_PATTERN = /feishu-messages\/(\d{14})\.txt$/i;
 
 function parseTimestampFromKey(key: string): string | undefined {
-  const matched = key.match(REPORT_FILE_PATTERN);
+  const matched = key.match(FEISHU_MESSAGE_FILE_PATTERN);
   if (!matched) return undefined;
   const stamp = matched[1];
   return `${stamp.slice(0, 4)}-${stamp.slice(4, 6)}-${stamp.slice(6, 8)}T${stamp.slice(8, 10)}:${stamp.slice(10, 12)}:${stamp.slice(12, 14)}Z`;
@@ -21,9 +21,9 @@ function isRecent(iso: string, lookbackDays: number, now: Date): boolean {
 export async function collectRecentSourceReports(config: AppConfig, now = new Date()): Promise<SourceReport[]> {
   const reports: SourceReport[] = [];
   for (const prefix of config.sourcePrefixes) {
-    const objects = await listCosObjects(config, prefix);
+    const objects = await listCosObjects(config, `${prefix}/feishu-messages`);
     const candidates = objects
-      .filter((item) => REPORT_FILE_PATTERN.test(item.key))
+      .filter((item) => FEISHU_MESSAGE_FILE_PATTERN.test(item.key))
       .map((item) => ({ ...item, generatedAt: parseTimestampFromKey(item.key) ?? item.lastModified }))
       .filter((item): item is typeof item & { generatedAt: string } => Boolean(item.generatedAt && isRecent(item.generatedAt, config.lookbackDays, now)))
       .sort((a, b) => b.generatedAt.localeCompare(a.generatedAt))
@@ -31,7 +31,7 @@ export async function collectRecentSourceReports(config: AppConfig, now = new Da
 
     for (const object of candidates) {
       const rawContent = await fetchCosObjectText(config, object.key);
-      const { extractedText, excerpt } = extractTextFromReport(rawContent, config.maxReportChars, prefix);
+      const { extractedText, excerpt } = extractTextFromReport(rawContent, config.maxReportChars);
       if (!extractedText) continue;
       reports.push({
         sourcePrefix: prefix,
