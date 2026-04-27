@@ -42,6 +42,8 @@
     "MAX_REPORT_CHARS": "6000",
     "MAX_SOURCE_CHARS": "12000",
     "MAX_TOTAL_CHARS": "48000",
-    "TENCENT_COS_BUCKET": "cloudflare-static-1252612849"
+    "TENCENT_COS_BUCKET": "cloudflare-static-1252612849",
+    "TENCENT_COS_REGION": "na-ashburn",
+    "TENCENT_COS_BASE_URL": "https://cloudflare-static-1252612849.cos.na-ashburn.myqcloud.com"
   }
 }
